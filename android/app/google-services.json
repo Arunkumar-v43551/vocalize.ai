@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "576034009867",
+    "project_id": "vocalize-b2354",
+    "storage_bucket": "vocalize-b2354.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:576034009867:android:99b52db783eab6b0cea80e",
+        "android_client_info": {
+          "package_name": "vocalize.ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "576034009867-lttmmrcfgp05lkb47ufhcdemvrkoh9ku.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBu2M7ksXFHXciqbeP3Ybf3D8mPOY7fFUE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "576034009867-lttmmrcfgp05lkb47ufhcdemvrkoh9ku.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
