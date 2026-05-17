@@ -84,3 +84,8 @@ body {
 .text-balance {
   text-wrap: balance;
 }
+
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.2) transparent;
+}
