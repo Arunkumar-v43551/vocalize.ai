@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Play, 
@@ -7,7 +7,6 @@ import {
   Download, 
   Mic, 
   Settings2, 
-  Type as TypeIcon, 
   Languages, 
   Sparkles,
   Volume2,
@@ -20,22 +19,28 @@ import {
   User as UserIcon,
   BarChart2,
   Clapperboard,
+  HelpCircle,
 } from 'lucide-react';
 import { generateSpeech } from './services/geminiService';
 import { decodeBase64, pcmToWavBlob } from './utils/audioUtils';
 import { processTextForTiming, TextToken } from './utils/textUtils';
+import { toast } from './utils/toast';
 import VoiceSelector from './components/VoiceSelector';
 import Visualizer from './components/Visualizer';
 import AuthModal from './components/AuthModal';
-import HistorySidebar from './components/HistorySidebar';
+import ToastContainer from './components/ToastContainer';
+import HistorySidebar from './components/HistorySidebar_Improved';
 import AnalyticsDashboard from './components/AnalyticsDashboard';
 import ScriptEnhancer from './components/ScriptEnhancer';
 import LanguageDetector from './components/LanguageDetector';
 import EmotionTimeline from './components/EmotionTimeline';
+import KeyboardShortcutsModal from './components/KeyboardShortcutsModal';
+import { useKeyboardShortcuts, COMMON_SHORTCUTS } from './hooks/useKeyboardShortcuts';
 import { onAuthChange, signOut } from './firebase/authService';
 import { saveSession, formatSessionLabel, VocalSession } from './firebase/sessionService';
 import { User } from 'firebase/auth';
-import { VoiceName, Language, SAMPLE_TEXTS, SampleText, Emotion, EMOTION_OPTIONS } from './types';
+import { VoiceName, Language, SAMPLE_TEXTS, Emotion, EMOTION_OPTIONS } from './types';
+import IdleWaveform from './components/IdleWaveform';
 
 const App: React.FC = () => {
   // ── Firebase Auth ──────────────────────────────────────────────────────────
@@ -44,6 +49,7 @@ const App: React.FC = () => {
   const [showHistory, setShowHistory] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showTimeline, setShowTimeline] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthChange((user) => {
@@ -77,10 +83,21 @@ const App: React.FC = () => {
   const analyserRef = useRef<AnalyserNode | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const blobUrlRef = useRef<string | null>(null);
 
-  const initAudioContext = () => {
+  useEffect(() => {
+    blobUrlRef.current = currentBlobUrl;
+  }, [currentBlobUrl]);
+
+  useEffect(() => {
+    return () => {
+      if (blobUrlRef.current) URL.revokeObjectURL(blobUrlRef.current);
+    };
+  }, []);
+
+  const initAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      const AudioCtx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       audioContextRef.current = new AudioCtx({ sampleRate: 24000 });
       
       const analyzerNode = audioContextRef.current.createAnalyser();
@@ -102,7 +119,7 @@ const App: React.FC = () => {
         console.error("Error creating MediaElementSource:", e);
       }
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -149,9 +166,14 @@ const App: React.FC = () => {
   }, [isPlaying, updateHighlight]);
 
   const handleGenerate = async () => {
-    if (!text.trim()) return;
+    if (!text.trim()) {
+      toast.warning('Enter some text before generating speech.');
+      return;
+    }
     if (!process.env.API_KEY) {
-      setError("API Key is missing.");
+      const msg = 'API key is missing. Add GEMINI_API_KEY to your environment.';
+      setError(msg);
+      toast.error(msg);
       return;
     }
 
@@ -200,8 +222,8 @@ const App: React.FC = () => {
         }
       }
 
-      // Auto-switch to reader mode
       setIsReaderMode(true);
+      toast.success('Speech generated successfully.');
 
       if (audioRef.current) {
         audioRef.current.src = blobUrl;
@@ -214,8 +236,10 @@ const App: React.FC = () => {
         }
       }
 
-    } catch (err: any) {
-      setError(err.message || "Failed to generate speech");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to generate speech';
+      setError(msg);
+      toast.error(msg);
     } finally {
       setIsLoading(false);
     }
@@ -230,6 +254,8 @@ const App: React.FC = () => {
     setSpeed(session.speed);
     setHasGeneratedAudio(false);
     setIsReaderMode(false);
+    setError(null);
+    toast.info('Session loaded — generate again to hear audio.');
   };
 
   const handleReplay = async () => {
@@ -248,23 +274,26 @@ const App: React.FC = () => {
   };
 
   const handleDownload = () => {
-    if (currentBlobUrl) {
-      const a = document.createElement('a');
-      a.href = currentBlobUrl;
-      a.download = `vocalize-${selectedVoice}-${selectedEmotion.toLowerCase()}-${Date.now()}.wav`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+    if (!currentBlobUrl) {
+      toast.warning('Generate speech first before downloading.');
+      return;
     }
+    const a = document.createElement('a');
+    a.href = currentBlobUrl;
+    a.download = `vocalize-${selectedVoice}-${selectedEmotion.toLowerCase()}-${Date.now()}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast.success('Audio download started.');
   };
 
-  const stopAudio = () => {
+  const stopAudio = useCallback(() => {
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       setIsPlaying(false);
     }
-  };
+  }, []);
 
   const handleLanguageChange = (lang: Language) => {
     setSelectedLanguage(lang);
@@ -283,6 +312,59 @@ const App: React.FC = () => {
       setIsReaderMode(false);
     }
   };
+
+  const togglePlayback = useCallback(async () => {
+    if (!currentBlobUrl || !audioRef.current) return;
+    initAudioContext();
+    audioRef.current.playbackRate = speed;
+    if (isPlaying) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+      return;
+    }
+    setIsReaderMode(true);
+    try {
+      await audioRef.current.play();
+      setIsPlaying(true);
+    } catch (e) {
+      console.error('Playback failed:', e);
+      toast.error('Playback failed. Try again.');
+    }
+  }, [currentBlobUrl, isPlaying, speed, initAudioContext]);
+
+  const closeTopOverlay = useCallback(() => {
+    if (showHelp) {
+      setShowHelp(false);
+      return true;
+    }
+    if (showHistory) {
+      setShowHistory(false);
+      return true;
+    }
+    if (showAnalytics) {
+      setShowAnalytics(false);
+      return true;
+    }
+    return false;
+  }, [showHelp, showHistory, showAnalytics]);
+
+  const shortcuts = useMemo(() => ({
+    [COMMON_SHORTCUTS.GENERATE]: () => {
+      if (!isLoading && text.trim()) handleGenerate();
+    },
+    [COMMON_SHORTCUTS.PLAY_PAUSE]: togglePlayback,
+    [COMMON_SHORTCUTS.STOP]: () => {
+      if (!closeTopOverlay()) stopAudio();
+    },
+    [COMMON_SHORTCUTS.DOWNLOAD]: () => {
+      if (currentBlobUrl) handleDownload();
+    },
+    [COMMON_SHORTCUTS.HISTORY]: () => setShowHistory(true),
+    [COMMON_SHORTCUTS.ANALYTICS]: () => setShowAnalytics(true),
+    '?': () => setShowHelp((prev) => !prev),
+  }), [isLoading, text, currentBlobUrl, togglePlayback, closeTopOverlay, stopAudio]);
+
+  useKeyboardShortcuts(shortcuts, !authLoading && !!currentUser);
 
   // ── Loading screen ─────────────────────────────────────────────────────────
   if (authLoading) {
@@ -306,6 +388,9 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen relative overflow-hidden bg-[#020617] text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30 selection:text-indigo-200">
 
+      {/* Toast Container */}
+      <ToastContainer />
+
       {/* History Sidebar */}
       <HistorySidebar
         isOpen={showHistory}
@@ -319,6 +404,11 @@ const App: React.FC = () => {
         isOpen={showAnalytics}
         onClose={() => setShowAnalytics(false)}
         uid={currentUser.uid}
+      />
+
+      <KeyboardShortcutsModal
+        isOpen={showHelp}
+        onClose={() => setShowHelp(false)}
       />
       
       {/* Immersive Background */}
@@ -396,6 +486,16 @@ const App: React.FC = () => {
             >
               <History className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">History</span>
+            </motion.button>
+
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => setShowHelp(true)}
+              title="Keyboard shortcuts (?)"
+              className="w-9 h-9 flex items-center justify-center rounded-full bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
             </motion.button>
 
             {/* User Avatar + Sign Out */}
@@ -702,21 +802,7 @@ const App: React.FC = () => {
                         </div>
                       </motion.div>
                     ) : (
-                       <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600">
-                          <div className="flex items-end space-x-1.5 h-16 mb-4 opacity-20">
-                            {[...Array(12)].map((_, i) => (
-                              <div 
-                                key={i} 
-                                className="w-2 bg-indigo-500 rounded-full animate-pulse" 
-                                style={{ 
-                                  height: `${20 + Math.random() * 60}%`,
-                                  animationDelay: `${i * 0.1}s` 
-                                }} 
-                              />
-                            ))}
-                          </div>
-                          <span className="text-[10px] font-bold uppercase tracking-[0.3em] opacity-40">Awaiting Signal</span>
-                       </div>
+                      <IdleWaveform />
                     )}
                   </AnimatePresence>
                </div>
@@ -725,8 +811,50 @@ const App: React.FC = () => {
                <div className="mt-8 flex flex-col sm:flex-row gap-6">
                   
                   {/* Primary Action */}
-                  <div className="flex-grow">
-                    {!isPlaying ? (
+                  <div className="flex-grow flex gap-3">
+                    {isPlaying ? (
+                      <motion.button
+                        whileHover={{ scale: 1.01, translateY: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={stopAudio}
+                        className="flex-1 h-16 rounded-2xl font-bold text-lg bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-all flex items-center justify-center space-x-3"
+                      >
+                        <Pause className="w-6 h-6" fill="currentColor" />
+                        <span className="uppercase tracking-widest text-sm">Stop</span>
+                      </motion.button>
+                    ) : hasGeneratedAudio && currentBlobUrl ? (
+                      <>
+                        <motion.button
+                          whileHover={{ scale: 1.01, translateY: -2 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={togglePlayback}
+                          disabled={isLoading}
+                          className="flex-1 h-16 rounded-2xl font-bold text-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 hover:bg-emerald-500/20 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
+                        >
+                          <Play className="w-6 h-6" fill="currentColor" />
+                          <span className="uppercase tracking-widest text-sm">Play</span>
+                        </motion.button>
+                        <motion.button
+                          whileHover={{ scale: 1.01, translateY: -2 }}
+                          whileTap={{ scale: 0.98 }}
+                          onClick={handleGenerate}
+                          disabled={isLoading || !text.trim()}
+                          className="flex-1 h-16 rounded-2xl font-bold text-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white shadow-indigo-600/20 transition-all flex items-center justify-center space-x-3 disabled:opacity-50"
+                        >
+                          {isLoading ? (
+                            <>
+                              <motion.div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              <span className="uppercase tracking-widest text-sm">Synthesizing...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="w-5 h-5" />
+                              <span className="uppercase tracking-widest text-sm">Regenerate</span>
+                            </>
+                          )}
+                        </motion.button>
+                      </>
+                    ) : (
                       <motion.button
                         whileHover={{ scale: 1.01, translateY: -2 }}
                         whileTap={{ scale: 0.98 }}
@@ -742,25 +870,15 @@ const App: React.FC = () => {
                       >
                         {isLoading ? (
                           <>
-                            <div className="w-5 h-5 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin"></div>
+                            <div className="w-5 h-5 border-2 border-indigo-400/30 border-t-indigo-400 rounded-full animate-spin" />
                             <span className="uppercase tracking-widest text-sm">Synthesizing...</span>
                           </>
                         ) : (
                           <>
                             <Sparkles className="w-6 h-6" />
-                            <span className="uppercase tracking-widest text-sm">{hasGeneratedAudio ? "Regenerate Audio" : "Generate Speech"}</span>
+                            <span className="uppercase tracking-widest text-sm">Generate Speech</span>
                           </>
                         )}
-                      </motion.button>
-                    ) : (
-                      <motion.button
-                        whileHover={{ scale: 1.01, translateY: -2 }}
-                        whileTap={{ scale: 0.98 }}
-                        onClick={stopAudio}
-                        className="w-full h-16 rounded-2xl font-bold text-lg bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500/20 transition-all flex items-center justify-center space-x-3"
-                      >
-                        <Pause className="w-6 h-6" fill="currentColor" />
-                        <span className="uppercase tracking-widest text-sm">Stop Playback</span>
                       </motion.button>
                     )}
                   </div>
